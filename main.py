@@ -1,57 +1,51 @@
-from fastapi import FastAPI, File, UploadFile
-from google.cloud import storage
+import os
 import tensorflow as tf
-from PIL import Image
+from fastapi import FastAPI, UploadFile, File
+from fastapi.middleware.cors import CORSMiddleware
+import uvicorn
 import numpy as np
 from io import BytesIO
-from fastapi.responses import JSONResponse
+from PIL import Image
 
-# FastAPI app setup
 app = FastAPI()
 
-# Global variables for the model
-model = None
-class_names = ["Early Blight", "Late Blight", "Healthy"]
-BUCKET_NAME = "your-bucket-name"  # Replace with your actual GCP bucket name
-MODEL_PATH = "models/potatoes.h5"  # Path to the model in the GCP bucket
+origins = [
+    "http://localhost",
+    "http://localhost:3000",  # This is for your React app running locally
+]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-def download_blob(bucket_name, source_blob_name, destination_file_name):
-    """Downloads a blob from the bucket."""
-    storage_client = storage.Client()
-    bucket = storage_client.get_bucket(bucket_name)
-    blob = bucket.blob(source_blob_name)
+Model = tf.keras.models.load_model("../training/keras_models/1/keras_model1.keras")
+CLASS_NAMES = ["Early Blight", "Late Blight", "Healthy"]
 
-    # Download the blob to the destination file
-    blob.download_to_filename(destination_file_name)
-    print(f"Blob {source_blob_name} downloaded to {destination_file_name}.")
+@app.get("/ping")
+async def ping():
+    return "Hello, I am alive!"
 
-@app.on_event("startup")
-async def load_model():
-    """Load the model on startup."""
-    global model
-    # Download the model from the GCP bucket
-    download_blob(BUCKET_NAME, MODEL_PATH, "/tmp/potatoes.h5")
-    model = tf.keras.models.load_model("/tmp/potatoes.h5")
-    print("Model loaded successfully!")
+def read_file_as_image(data) -> np.ndarray:
+    image = np.array(Image.open(BytesIO(data)))
+    return image
 
-@app.post("/predict/")
+@app.post("/predict")
 async def predict(file: UploadFile = File(...)):
-    """Handle prediction requests."""
-    global model
-    if model is None:
-        return JSONResponse(content={"error": "Model is not loaded yet"}, status_code=500)
+    image = read_file_as_image(await file.read())
+    image_batch = np.expand_dims(image, 0)
+    predictions = Model.predict(image_batch)
+    prediction_class = CLASS_NAMES[np.argmax(predictions[0])]
+    confidence = np.max(predictions[0])
+    print(prediction_class, confidence)
+    return {
+        "class": prediction_class,
+        "confidence": float(confidence)
+    }
 
-    # Read the uploaded image
-    img_bytes = await file.read()
-    image = Image.open(BytesIO(img_bytes)).convert("RGB").resize((256, 256))
-
-    # Convert image to numpy array and normalize it
-    img_array = np.array(image) / 255.0  # Normalize the image between 0 and 1
-    img_array = np.expand_dims(img_array, axis=0)  # Add batch dimension
-
-    # Make predictions
-    predictions = model.predict(img_array)
-    predicted_class = class_names[np.argmax(predictions[0])]
-    confidence = round(100 * np.max(predictions[0]), 2)
-
-    return {"class": predicted_class, "confidence": confidence}
+if __name__ == "__main__":
+    # Use the PORT environment variable provided by Render
+    port = int(os.getenv("PORT", 8000))
+    uvicorn.run(app, host="0.0.0.0", port=port)
