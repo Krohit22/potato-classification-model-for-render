@@ -1,10 +1,12 @@
-from flask import Flask, request, jsonify
+from fastapi import FastAPI, File, UploadFile
 from google.cloud import storage
 import tensorflow as tf
 from PIL import Image
 import numpy as np
+from io import BytesIO
+from fastapi.responses import JSONResponse
 
-app = Flask(__name__)
+app = FastAPI()
 
 model = None
 class_names = ["Early Blight", "Late Blight", "Healthy"]
@@ -17,32 +19,34 @@ def download_blob(bucket_name, source_blob_name, destination_file_name):
     blob = bucket.blob(source_blob_name)
 
     blob.download_to_filename(destination_file_name)
-
     print(f"Blob {source_blob_name} downloaded to {destination_file_name}.")
 
-@app.route("/predict", methods=["POST"])
-def predict():
+@app.on_event("startup")
+async def load_model():
+    """Load the model on startup."""
+    global model
+    download_blob(BUCKET_NAME, "models/potatoes.h5", "/tmp/potatoes.h5")
+    model = tf.keras.models.load_model("/tmp/potatoes.h5")
+    print("Model loaded successfully!")
+
+@app.post("/predict/")
+async def predict(file: UploadFile = File(...)):
+    """Handle prediction requests."""
     global model
     if model is None:
-        download_blob(
-            BUCKET_NAME,
-            "models/potatoes.h5",
-            "/tmp/potatoes.h5",
-        )
-        model = tf.keras.models.load_model("/tmp/potatoes.h5")
+        return JSONResponse(content={"error": "Model is not loaded yet"}, status_code=500)
 
-    image = request.files["file"]
-    image = np.array(
-        Image.open(image).convert("RGB").resize((256, 256))  # image resizing
-    )
-    image = image / 255  # normalize the image in 0 to 1 range
-    img_array = tf.expand_dims(image, 0)
+    # Read image from the incoming file
+    img_bytes = await file.read()
+    image = Image.open(BytesIO(img_bytes)).convert("RGB").resize((256, 256))
+    
+    # Convert image to numpy array and normalize it
+    img_array = np.array(image) / 255.0  # Normalize the image between 0 and 1
+    img_array = np.expand_dims(img_array, axis=0)  # Add batch dimension
+
+    # Make predictions
     predictions = model.predict(img_array)
-
     predicted_class = class_names[np.argmax(predictions[0])]
-    confidence = round(100 * (np.max(predictions[0])), 2)
+    confidence = round(100 * np.max(predictions[0]), 2)
 
-    return jsonify({"class": predicted_class, "confidence": confidence})
-
-if __name__ == "__main__":
-    app.run(debug=True)
+    return {"class": predicted_class, "confidence": confidence}
