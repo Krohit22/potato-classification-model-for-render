@@ -9,6 +9,7 @@ import os
 app = FastAPI(title="Potato Disease Classification API")
 
 origins = [
+    "*"
     "http://localhost",
     "http://localhost:3000",
 ]
