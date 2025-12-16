@@ -1,36 +1,62 @@
 from fastapi import FastAPI, UploadFile, File
-import tensorflow as tf
 from fastapi.middleware.cors import CORSMiddleware
-import uvicorn
+import tensorflow as tf
 import numpy as np
 from io import BytesIO
 from PIL import Image
+import os
 
-app = FastAPI()
+app = FastAPI(title="Potato Disease Classification API")
 
+# -----------------------
+# CORS (important for frontend)
+# -----------------------
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # change to your frontend URL later
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-Model = tf.keras.models.load_model("./potatoes.h5")
+# -----------------------
+# Load model
+# -----------------------
+MODEL_PATH = "potatoes.h5"
+model = tf.keras.models.load_model(MODEL_PATH)
+
 CLASS_NAMES = ["Early Blight", "Late Blight", "Healthy"]
 
-@app.get('/')
+# -----------------------
+# Routes
+# -----------------------
+@app.get("/")
 def read_root():
-    return {'message': 'potatos classification model API'}
+    return {"message": "Potato classification model API is running"}
 
 def read_file_as_image(data) -> np.ndarray:
-    image = np.array(Image.open(BytesIO(data)))
+    image = Image.open(BytesIO(data)).convert("RGB")
+    image = np.array(image)
     return image
 
 @app.post("/predict")
-async def predict(file: UploadFile=File(...)):
+async def predict(file: UploadFile = File(...)):
     image = read_file_as_image(await file.read())
-    image_batch = np.expand_dims(image,0)
-    predictions = Model.predict(image_batch)
+    image_batch = np.expand_dims(image, axis=0)
+
+    predictions = model.predict(image_batch)
     prediction_class = CLASS_NAMES[np.argmax(predictions[0])]
-    confidence = np.max(predictions[0])
-    print(prediction_class, confidence)
-    return{
-        "class" : prediction_class,
-        "confidence" : float(confidence)
+    confidence = float(np.max(predictions[0]))
+
+    return {
+        "class": prediction_class,
+        "confidence": confidence
     }
 
-    
+# -----------------------
+# Entry point for Render
+# -----------------------
+if __name__ == "__main__":
+    import uvicorn
+    port = int(os.environ.get("PORT", 8000))
+    uvicorn.run("main:app", host="localhost", port=port)
