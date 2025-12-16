@@ -22,7 +22,7 @@ app.add_middleware(
 # -----------------------
 # Load model
 # -----------------------
-model = tf.keras.models.load_model("potatoes.h5")
+model = tf.keras.models.load_model("keras_model3.keras")
 
 # ⚠️ MUST MATCH TRAINING ORDER
 CLASS_NAMES = ["Early Blight", "Late Blight", "Healthy"]
