@@ -8,9 +8,6 @@ import os
 
 app = FastAPI(title="Potato Disease Classification API")
 
-# -----------------------
-# CORS
-# -----------------------
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost", "http://localhost:3000"],
@@ -20,31 +17,22 @@ app.add_middleware(
 )
 
 # -----------------------
-# Load model
+# Load Teachable Machine model
 # -----------------------
 model = tf.keras.models.load_model("keras_model3.keras")
 
-# ⚠️ MUST MATCH TRAINING ORDER
+# ⚠️ MUST MATCH TEACHABLE MACHINE CLASS ORDER
 CLASS_NAMES = ["Early Blight", "Late Blight", "Healthy"]
 
-IMAGE_SIZE = (255, 255)  # change ONLY if training size was different
-
 # -----------------------
-# Image preprocessing (FIXED)
+# Correct preprocessing for TM
 # -----------------------
 def read_file_as_image(data) -> np.ndarray:
     image = Image.open(BytesIO(data)).convert("RGB")
-    image = image.resize(IMAGE_SIZE)
-    image = np.array(image, dtype=np.float32)
-
-    # ✅ normalize ONLY ONCE
-    image = image / 255.0
-
+    image = image.resize((224, 224))              # ✅ REQUIRED
+    image = np.array(image, dtype=np.float32)     # ❌ NO /255
     return image
 
-# -----------------------
-# Routes
-# -----------------------
 @app.get("/")
 def read_root():
     return {"message": "Potato classification model API is running"}
@@ -54,9 +42,7 @@ async def predict(file: UploadFile = File(...)):
     image = read_file_as_image(await file.read())
     image_batch = np.expand_dims(image, axis=0)
 
-    # 🔥 Apply softmax safely
-    raw_predictions = model.predict(image_batch)[0]
-    predictions = tf.nn.softmax(raw_predictions).numpy()
+    predictions = model.predict(image_batch)[0]   # ✅ already softmax
 
     predicted_index = int(np.argmax(predictions))
     predicted_class = CLASS_NAMES[predicted_index]
@@ -65,12 +51,9 @@ async def predict(file: UploadFile = File(...)):
     return {
         "class": predicted_class,
         "confidence": confidence,
-        "raw_scores": predictions.tolist()  # keep for debugging
+        "raw_scores": predictions.tolist()
     }
 
-# -----------------------
-# Entry point
-# -----------------------
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(
