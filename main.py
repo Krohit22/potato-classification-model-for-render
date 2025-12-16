@@ -8,10 +8,10 @@ import os
 
 app = FastAPI(title="Potato Disease Classification API")
 
-origins=[
-        "http://localhost:3000",  # React dev server
-    ],
-
+origins = [
+    "http://localhost",
+    "http://localhost:3000",
+]
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
